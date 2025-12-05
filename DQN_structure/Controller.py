@@ -9,7 +9,6 @@ np.set_printoptions(threshold=np.inf)
 import os
 import sys
 
-# --- 【新增代码 Start】 ---
 # 将上级目录加入路径，以便能导入 utils 包
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -17,7 +16,6 @@ if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
 from utils import astar # 导入 A* 算法模块
-# --- 【新增代码 End】 ---
 
 from DQN_structure.DQN import Net as Net
 from DQN_structure.DQN import Agent as Agent
@@ -37,9 +35,11 @@ class DQNAgentController:
         self.state_number = state_number
 
         '''--------【A* 开关】--------'''
-        # True = 使用 A* 
-        # False = 纯 DQN
-        self.use_astar_guidance = False  
+        self.use_shaping = True   # 开关：是否开启奖励塑造
+        self.use_astar_guidance = True  
+        self.shaping_factor = 1.0 # 缩放因子：这一项越大，老师的引导作用越强
+        self.gamma = self.agent.GAMMA # 必须和 DQN 的 gamma 一致 (通常是 0.95)
+        
 
         '''get RMFS object'''
         self.rmfs_model = rmfs_scene
@@ -61,12 +61,7 @@ class DQNAgentController:
         '''create Agent object'''
         self.agent = Agent(policy_net, target_net)
 
-        # --- 【新增代码 Start】 ---
-        # 奖励塑造参数
-        self.use_shaping = True   # 开关：是否开启奖励塑造
-        self.shaping_factor = 1.0 # 缩放因子：这一项越大，老师的引导作用越强
-        self.gamma = self.agent.GAMMA # 必须和 DQN 的 gamma 一致 (通常是 0.95)
-        # --- 【新增代码 End】 ---
+
 
         '''training parameters'''
         self.simulation_times = 5000
@@ -207,38 +202,38 @@ class DQNAgentController:
         return action
 
     def check_action(self, this_veh_cp, veh_tp, valid_path_matrix, action, this_veh):
-        # 1. 预测 AGV 执行动作后的新位置 (veh_cp)
-        veh_cp = this_veh_cp.copy()
-        if action == 0:
-            veh_cp[1] -= 1
-        if action == 1:
-            veh_cp[0] += 1
-        if action == 2:
-            veh_cp[1] += 1
-        if action == 3:
-            veh_cp[0] -= 1
+        # # 1. 预测 AGV 执行动作后的新位置 (veh_cp)
+        # veh_cp = this_veh_cp.copy()
+        # if action == 0:
+        #     veh_cp[1] -= 1
+        # if action == 1:
+        #     veh_cp[0] += 1
+        # if action == 2:
+        #     veh_cp[1] += 1
+        # if action == 3:
+        #     veh_cp[0] -= 1
 
-        # 2. 判断动作是否非法 (越界 或 撞墙)
-        is_invalid = False
+        # # 2. 判断动作是否非法 (越界 或 撞墙)
+        # is_invalid = False
         
-        # 检查是否越出地图边界
-        if veh_cp[0] <= 0 or veh_cp[1] <= 0 or veh_cp[0] > len(valid_path_matrix[0]) or veh_cp[1] > len(valid_path_matrix):
-            is_invalid = True
-        # 检查是否撞到障碍物 (valid_path_matrix 中值为 0 的地方)
-        elif valid_path_matrix[veh_cp[1]-1][veh_cp[0]-1] == 0:
-            is_invalid = True
+        # # 检查是否越出地图边界
+        # if veh_cp[0] <= 0 or veh_cp[1] <= 0 or veh_cp[0] > len(valid_path_matrix[0]) or veh_cp[1] > len(valid_path_matrix):
+        #     is_invalid = True
+        # # 检查是否撞到障碍物 (valid_path_matrix 中值为 0 的地方)
+        # elif valid_path_matrix[veh_cp[1]-1][veh_cp[0]-1] == 0:
+        #     is_invalid = True
 
-        # 3. 根据开关决定是否修正
-        if is_invalid:
-            # 只有在开启 A* 指导时，才帮它修正
-            if self.use_astar_guidance:
-                import random
-                action = random.randint(0, 3)
-            #action = self.agent.choose_action_as(current_place=this_veh_cp, target_place=veh_tp, valid_path_matrix=valid_path_matrix)[0]
-            else:
-                # 纯 DQN 模式：不修正，直接返回错误的 action。
-                # 这样环境中的 Explorer 就会执行这个动作，检测到碰撞，返回 -1 奖励。
-                pass 
+        # # 3. 根据开关决定是否修正
+        # if is_invalid:
+        #     # 只有在开启 A* 指导时，才帮它修正
+        #     if self.use_astar_guidance:
+        #         import random
+        #         action = random.randint(0, 3)
+        #     #action = self.agent.choose_action_as(current_place=this_veh_cp, target_place=veh_tp, valid_path_matrix=valid_path_matrix)[0]
+        #     else:
+        #         # 纯 DQN 模式：不修正，直接返回错误的 action。
+        #         # 这样环境中的 Explorer 就会执行这个动作，检测到碰撞，返回 -1 奖励。
+        #         pass 
         
         return action
 

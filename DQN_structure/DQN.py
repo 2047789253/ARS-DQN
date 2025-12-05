@@ -244,7 +244,6 @@ class Agent:
         self.loss_function = torch.nn.SmoothL1Loss()
         self.loss_value = []
 
-    # 增加 use_astar 参数，默认为 True 保持兼容
     def choose_action(self, obs, current_place, target_place, valid_path_matrix, matrix_padding=0, use_astar=True):
         # self.epsilon = 1
         # self.epsilon = 0
@@ -261,7 +260,7 @@ class Agent:
         else:  # exploration (探索)
             t_s = time.time()
             if use_astar:
-                # 【模式 A】使用 A* 算法指导探索 (原逻辑)
+                # 【模式 A】使用 A* 算法指导探索
                 action = self.find_action_astar(valid_path_matrix, current_place, target_place)
             else:
                 # 【模式 B】纯 DQN：使用完全随机动作探索
