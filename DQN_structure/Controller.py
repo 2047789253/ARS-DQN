@@ -36,9 +36,7 @@ class DQNAgentController:
 
         '''--------【A* 开关】--------'''
         self.use_shaping = True   # 开关：是否开启奖励塑造
-        self.use_astar_guidance = True  
-        self.shaping_factor = 1.0 # 缩放因子：这一项越大，老师的引导作用越强
-        self.gamma = self.agent.GAMMA # 必须和 DQN 的 gamma 一致 (通常是 0.95)
+        self.use_astar_guidance = True 
         
 
         '''get RMFS object'''
@@ -60,8 +58,8 @@ class DQNAgentController:
 
         '''create Agent object'''
         self.agent = Agent(policy_net, target_net)
-
-
+        self.shaping_factor = 1.0 # 缩放因子：这一项越大，老师的引导作用越强
+        self.gamma = self.agent.GAMMA # 必须和 DQN 的 gamma 一致 (通常是 0.95)
 
         '''training parameters'''
         self.simulation_times = 5000
@@ -180,12 +178,10 @@ class DQNAgentController:
         """get observation and other info"""
         obs, this_veh_cp, this_veh_tp, valid_path_matrix = self.create_state(all_info, this_veh)
         
-        # --- 【新增代码 Start】 ---
         # 在做决定前，先算出“我现在离终点有多远（势能）”
         if self.use_shaping:
             current_potential = self.get_astar_potential(this_veh_cp, this_veh_tp, valid_path_matrix)
             veh_obj.last_potential = current_potential # 存在小车对象里，等会算奖励用
-        # --- 【新增代码 End】 ---
 
         """get action"""
         veh_obj.obs_current = obs

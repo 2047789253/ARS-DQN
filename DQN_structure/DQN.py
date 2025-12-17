@@ -211,7 +211,7 @@ class Agent:
         self.target_network = target_net.to(self.device)
 
         # info for training
-        self.epsilon_start = 0.8
+        self.epsilon_start = 0.1
         self.epsilon = self.epsilon_start
         self.epsilon_end = 1
         self.epsilon_count = 0
