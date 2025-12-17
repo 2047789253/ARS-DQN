@@ -15,7 +15,7 @@ class Scene:
         self.layout = layout
         self.control_pattern = ""
         self.clock = None
-        self.FPS = 30  # 300
+        self.FPS = 30 
         self.x_width = self.layout.scene_x_width
         self.y_width = self.layout.scene_y_width
         # other parameters related to scene
@@ -51,8 +51,15 @@ class Scene:
         self.action_number = self.dir.action_num()
         self.smart_controller = None
 
+        # 【修改】动态障碍物参数
+        # 障碍物在 x=4 (中间通道) 上运动
+        self.dyn_obs_x = 4 
+        self.dyn_obs_y_min = 0
+        self.dyn_obs_y_max = 8
+        self.dyn_obs_current_pos = [4, 0] # 记录当前位置用于清除
+
     def _load_fonts(self):
-        """【新增函数】每轮游戏开始时重新加载字体"""
+        """每轮游戏开始时重新加载字体"""
         pygame.font.init()
         self.font_title = pygame.font.SysFont("Times New Roman", 30)
         self.font_agv = pygame.font.SysFont("Times New Roman", 15)
@@ -63,19 +70,52 @@ class Scene:
         self.layout.init()
         for explorer in self.explorer_group:
             explorer.init()
-        """observations"""
+        # 重置障碍物位置
+        self.dyn_obs_current_pos = [4, 0]
+
+    # 【修改】根据时间步 t 更新障碍物位置
+    def update_dynamic_obstacles(self, t):
+        layout_grid = self.layout.layout_original
+        
+        # 1. 清除上一时刻的障碍物 (设回 0: 空地)
+        old_x, old_y = self.dyn_obs_current_pos
+        if 0 <= old_y < self.y_width and 0 <= old_x < self.x_width:
+             layout_grid[old_y][old_x] = 0 
+
+        # 2. 计算新位置 (Pos = f(t))
+        # 使用往复运动 (Ping-Pong) 逻辑
+        # 周期长度 T = 2 * (max - min)
+        # 例如 0->8->0，距离是8，来回是16步一个周期
+        span = self.dyn_obs_y_max - self.dyn_obs_y_min
+        cycle = 2 * span
+        
+        t_mod = t % cycle
+        if t_mod <= span:
+            # 正向移动: 0, 1, ..., 8
+            new_y = self.dyn_obs_y_min + t_mod
+        else:
+            # 反向移动: 8, 7, ..., 0
+            # 这里的逻辑是: max - (t_mod - max) = 2*max - t_mod
+            new_y = self.dyn_obs_y_max - (t_mod - span)
+        
+        new_x = self.dyn_obs_x
+        self.dyn_obs_current_pos = [new_x, new_y]
+
+        # 3. 在地图上标记新障碍物
+        # 使用 '2' (picking station代码) 或自定义代码，确保 Controller 能识别为障碍
+        if 0 <= new_y < self.y_width and 0 <= new_x < self.x_width:
+            layout_grid[new_y][new_x] = 2 
 
     def run_game(self, control_pattern="manual", smart_controller=None):
         pygame.init()
         self._load_fonts()
         pygame.display.set_caption('multiAGV World')
-        self.control_pattern = control_pattern  # 0: "train_NN", 1: "use_NN", 2: "A_star", 3: "auto", 4: "manual"
-        self.explorer_group[0].create_explorer()  # 创建第一辆veh实体，后续车辆需要在画面刷新后创建
-        """"--screen--"""
+        self.control_pattern = control_pattern
+        self.explorer_group[0].create_explorer()
+        
         # screen
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
         self.screen.fill(self.color_box.GRAY_Color)
-        # screen display
         self.refresh_screen(self.explorer_group[0])
 
         self.clock = pygame.time.Clock()
@@ -91,8 +131,12 @@ class Scene:
         self.smart_controller = smart_controller
         running_time = 0
         while True:
-            running_time += 1
+            running_time += 1 # 这就是系统时间步 t
             self.clock.tick(self.FPS)
+
+            # 【关键修改】每一帧都更新障碍物，完全跟随 t
+            self.update_dynamic_obstacles(running_time)
+
             """standard code: exit game"""
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -119,32 +163,35 @@ class Scene:
                         self.patch_agv_icon(explorer)
                         continue
 
-                """collect infos and make decision by neural network"""
-                all_info = self.create_info()  # all_info=[layout, [veh1_details], [veh2_details]...]
-                input_action = self.smart_controller.choose_action(all_info, explorer.explorer_name)  # get action
+                """collect infos and make decision"""
+                # 此时 layout 已经包含了时刻 t 的动态障碍物
+                all_info = self.create_info()
+                
+                # Agent 根据当前状态 (包含动态障碍物) 做决策
+                input_action = self.smart_controller.choose_action(all_info, explorer.explorer_name)
 
                 """execute action"""
                 reward, is_end, all_info_ = explorer.execute_action(input_action, all_info)
                 self.patch_agv_icon(explorer)
 
-                # 需要对is_end进行矫正
                 if self.layout.task_finished:
                     is_end = True
                 self.smart_controller.store_info(all_info_, reward, is_end, explorer.explorer_name)
                 if is_end:
                     print("running_time", running_time)
                     return running_time
-            """查看是否可以创建新的veh（初始位置空出）"""
+            
             flags = self.check_new_veh()
             if flags != 0:
                 explorer = self.explorer_group[flags]
                 self.patch_agv_icon(explorer)
 
-            # update screen
             self.screen.blit(self.interface, (self.interface_start_x, self.interface_start_y))
             self.screen.blit(self.sidebar, (self.sidebar_start_x, self.sidebar_start_y))
 
-            pygame.display.flip()  # 更新屏幕内容
+            pygame.display.flip()
+
+    # ... (其余方法 run_mode_manual, run_mode_auto, refresh_screen, patch_agv_icon 保持不变) ...
 
     def run_mode_manual(self):
         print("Control by manual mode")
@@ -155,7 +202,6 @@ class Scene:
             input_action = ""
             self.clock.tick(self.FPS)
             explorer = self.explorer_group[0]
-            """"judge if explorer is working"""
             if explorer.Working:
                 if explorer.time_counting == explorer.Working_Time[explorer.working_type]:
                     explorer.continue_working()
@@ -163,7 +209,6 @@ class Scene:
                 else:
                     explorer.time_counting += 1
                     continue
-            """recieve action"""
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     sys.exit()
@@ -176,7 +221,6 @@ class Scene:
                         input_action = self.dir.value_str[3]
                     if event.key == pygame.K_RIGHT:
                         input_action = self.dir.value_str[1]
-            """execute action"""
             if input_action != "":
                 explorer.execute_action(input_action)
                 self.refresh_screen(explorer)
@@ -186,13 +230,12 @@ class Scene:
         while True:
             input_action = ""
             self.clock.tick(self.FPS)
-            """standard code: exit game"""
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     sys.exit()
 
-            self.create_interface()  # update interface
-            self.create_sidebar()   # update sidebar
+            self.create_interface()
+            self.create_sidebar()
 
             for explorer in self.explorer_group:
                 if not explorer.has_created:
@@ -213,15 +256,12 @@ class Scene:
                         self.patch_agv_icon(explorer)
                         continue
 
-                if not self.layout.task_finished:  # seem to be unnecessary
-                    # input_action = random.randint(0, 3)  # random
-                    input_action = explorer.find_path_astar(self.explorer_group)  # through strategy
-                """execute action"""
+                if not self.layout.task_finished:
+                    input_action = explorer.find_path_astar(self.explorer_group)
                 if input_action != "":
                     explorer.execute_action(input_action)
                     self.patch_agv_icon(explorer)
 
-            """查看是否可以创建新的veh（初始位置空出）"""
             flags = self.check_new_veh()
             if flags != 0:
                 explorer = self.explorer_group[flags]
@@ -229,16 +269,15 @@ class Scene:
 
             self.screen.blit(self.interface, (self.interface_start_x, self.interface_start_y))
             self.screen.blit(self.sidebar, (self.sidebar_start_x, self.sidebar_start_y))
-            pygame.display.flip()  # 更新屏幕内容
+            pygame.display.flip()
 
     def refresh_screen(self, explorer):
-        self.create_interface()  # update interface
-        self.patch_agv_icon(explorer)  # update AGV
-        self.create_sidebar()  # update sidebar
-        # update screen
+        self.create_interface()
+        self.patch_agv_icon(explorer)
+        self.create_sidebar()
         self.screen.blit(self.interface, (self.interface_start_x, self.interface_start_y))
         self.screen.blit(self.sidebar, (self.sidebar_start_x, self.sidebar_start_y))
-        pygame.display.flip()  # 更新屏幕内容
+        pygame.display.flip()
 
     def patch_agv_icon(self, explore_group):
         if not isinstance(explore_group, list):
@@ -246,7 +285,7 @@ class Scene:
         for explore in explore_group:
             agv_image = pygame.image.load(explore.icon_path)
             agv_image = pygame.transform.scale(agv_image, (
-            self.cell_width * self.AGV_icon_scale, self.cell_width * self.AGV_icon_scale))  # 图像缩放
+            self.cell_width * self.AGV_icon_scale, self.cell_width * self.AGV_icon_scale))
             agv_position = self.position_rectify(explore.current_place[0], explore.current_place[1])
             self.interface.blit(agv_image, agv_position)
 
@@ -260,12 +299,9 @@ class Scene:
                 pygame.draw.rect(self.interface, self.color_box.BLACK_COLOR, (
                 x_dim * (self.cell_width - self.line_width), y_dim * (self.cell_width - self.line_width),
                 self.cell_width, self.cell_width), self.line_width)
-                # draw picking_station and storage_station
+                
                 if (x_dim + 1, y_dim + 1) in self.layout.picking_station_list:
                     self.draw_block(self.interface, self.color_box.BLACK_COLOR, x_dim, y_dim)
-                    # img = pygame.image.load("icons/cart.png")
-                    # img = pygame.transform.scale(img, (self.cell_width*self.AGV_icon_scale, self.cell_width*self.AGV_icon_scale))
-                    # self.interface.blit(img, self.position_rectify(x_dim+1, y_dim+1))
                 if (x_dim + 1, y_dim + 1) in self.layout.storage_station_list:
                     if self.layout.layout[y_dim][x_dim] == 1.8:
                         self.draw_block(self.interface, self.color_box.PINK_COLOR, x_dim, y_dim)
@@ -273,16 +309,17 @@ class Scene:
                         self.draw_block(self.interface, self.color_box.GREEN_COLOR, x_dim, y_dim)
                     else:
                         self.draw_block(self.interface, self.color_box.RED_COLOR, x_dim, y_dim)
-                # draw axis value
                 if x_dim == 0:
                     self.draw_scale(self.screen, float(y_dim), "y")
                 if y_dim == 0:
                     self.draw_scale(self.screen, float(x_dim), "x")
-        # self.draw_scale(self.screen, float(self.x_width), "x")
-        # self.draw_scale(self.screen, float(self.y_width), "y")
+        
+        # 【修改】绘制动态障碍物 (蓝色)
+        d_x, d_y = self.dyn_obs_current_pos
+        if 0 <= d_x < self.x_width and 0 <= d_y < self.y_width:
+             self.draw_block(self.interface, (0, 0, 255), d_x, d_y)
 
     def create_sidebar(self):
-        """"--sidebar--"""
         # sidebar
         self.sidebar = pygame.Surface((self.sidebar_width, self.sidebar_height), flags=pygame.HWSURFACE)
         self.sidebar.fill(color=self.color_box.GRAY_Color)
@@ -355,7 +392,7 @@ class Scene:
             if self.explorer_group[explore_num].has_created:
                 if self.explorer_group[explore_num].current_place == [1, 1]:
                     init_pos_occupy = True
-            else:  # 所有被创建的车辆都已经检查过了
+            else:
                 if not init_pos_occupy:
                     self.explorer_group[explore_num].create_explorer()
                     flags = explore_num
