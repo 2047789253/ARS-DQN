@@ -36,9 +36,9 @@ class DQNAgentController:
 
         '''--------【A*/D* Lite 开关】--------'''
         self.use_shaping = True   # 开关：是否开启奖励塑造
-        self.use_astar_guidance = True  
+        self.use_astar_guidance = False 
         self.shaping_factor = 1.0 # 缩放因子
-        self.gamma = self.agent.GAMMA if hasattr(self, 'agent') else 0.95
+        self.gamma =  0.95
         
 
         '''get RMFS object'''

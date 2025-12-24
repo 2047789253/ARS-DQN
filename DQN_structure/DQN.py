@@ -147,7 +147,7 @@ class Agent:
         self.loss_function = torch.nn.SmoothL1Loss()
         self.loss_value = []
 
-    def choose_action(self, obs, current_place, target_place, valid_path_matrix, matrix_padding=0, use_astar=True):
+    def choose_action(self, obs, current_place, target_place, valid_path_matrix, matrix_padding=0, use_astar=False):
         if np.random.uniform() < self.epsilon:
             state = torch.from_numpy(obs).float().unsqueeze(0)
             state = state.to(self.device)
@@ -157,11 +157,12 @@ class Agent:
             action = torch.max(actions_value.cpu(), 1)[1].data.numpy()
         else:
             t_s = time.time()
-            # 【修改】使用 D* Lite 指导探索 (这里参数名仍叫 use_astar 保持兼容，但实际逻辑已改)
-            if use_astar:
-                action = self.find_action_dstarlite(valid_path_matrix, current_place, target_place)
-            else:
-                action = np.random.randint(0, 4)
+            # 【修改】使用 D* Lite 指导探索 (这里参数名仍叫 use_astar 保持兼容，但实际逻辑已改) 
+            # if use_astar:
+            #     action = self.find_action_dstarlite(valid_path_matrix, current_place, target_place)
+            # else:
+            #     action = np.random.randint(0, 4)
+            action = np.random.randint(0, 4)
             action = np.array([action])
             t_e = time.time()
         t_ = t_e-t_s
