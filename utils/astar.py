@@ -75,14 +75,9 @@ class FindPathAstar:
         _closed = []
         _open.append(self.start_cell)
         self.find_target = False
-        # print("_open", _open)
-        # print("len(_open)", len(_open))
 
         while _open:
-            # print("_open", _open)
-            # print("_________________")
-            # for n in _open:
-            #     print(n.position)
+
             min_f = np.argmin([n.all_cost for n in _open])  # 最小值的下标
             current_cell = _open[min_f]
             _closed.append(_open.pop(min_f))  # 移除列表中的一个元素（默认最后一个元素），并且返回该元素的值
@@ -97,7 +92,6 @@ class FindPathAstar:
                         is_in_close = True
                         break
                 if is_in_close:
-                    # print("__________________________________________________________________________")
                     continue
                 n.g = current_cell.g + 1
                 x1, y1 = n.position
@@ -127,7 +121,6 @@ class FindPathAstar:
                 current_cell = current_cell.parent
             path.append(current_cell.position)
             self.path_list = copy.deepcopy(path)
-        # return path[::-1]
 
     def astar_plot_map(self):
         self.path_map = self.wm.wm
@@ -154,18 +147,6 @@ class FindPathAstar:
 
 
 if __name__ == "__main__":
-    # valid_path = [[1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [0.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
-    #               [1.0000, 0.0000, 1.0000, 1.0000, 0.0000, 1.0000, 1.0000],
-    #               [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000]]
     valid_path = [[1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
                   [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
                   [0.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
@@ -178,8 +159,7 @@ if __name__ == "__main__":
                   [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
                   [1.0000, 0.0000, 1.0000, 1.0000, 0.0000, 1.0000, 1.0000],
                   [1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000]]
-    # start_position = (1, 4)  # (x,y)先横坐标，后纵坐标
-    # target_position = (6, 6)
+
     start_position = (0, 3)  # (x,y)先横坐标，后纵坐标
     target_position = (5, 5)
     founder = FindPathAstar(valid_path, start_position, target_position)
@@ -188,16 +168,3 @@ if __name__ == "__main__":
     print("path_list", path_list)
     print("path_map", path_map)
     print("action_list", action_list)
-
-    # world = Gridworld()
-    # #   stat position and Goal
-    # start = Cell()
-    # start.position = (0, 0)
-    # goal = Cell()
-    # goal.position = (4, 4)
-    # print(f"path from {start.position} to {goal.position}")
-    # s = astar(world, start, goal)
-    # #   Just for visual reasons
-    # for i in s:
-    #     world.w[i] = 1
-    # print(world.w)
