@@ -209,7 +209,7 @@ class DQNAgentController:
         return action
 
     def store_info(self, all_info, reward, is_end, this_veh):
-        # 记录原始累积奖励（用于绘图，不影响训练）
+        # 记录原始累积奖励（用于绘图显示真实表现，不包含 Shaping 和放大）
         self.reward_acc += reward
         
         # 如果是只使用网络模式（不训练），直接返回
@@ -224,111 +224,81 @@ class DQNAgentController:
                 break
         
         # --- 2. 获取当前状态 (State) ---
-        obs, this_veh_cp, this_veh_tp, valid_path_matrix = self.create_state(all_info, this_veh)
+        # 注意：这里的 create_state 获取的是动作执行后(Next State)的状态
+        obs_next, this_veh_cp, this_veh_tp, valid_path_matrix = self.create_state(all_info, this_veh)
 
-        # --- 3. 【关键修改】重构基础奖励 (The Carrot and Stick) ---
-        # 说明：为了防止 Shaping 奖励喧宾夺主，必须显著放大终点奖励
-        calc_reward = reward # 创建一个临时变量用于计算
+        # --- 3. 重构基础奖励 (The Carrot and Stick) ---
+        # 必须放大稀疏奖励，否则会被密集的势能奖励淹没
+        calc_reward = reward 
         
         if is_end:
             if reward > 0:
-                calc_reward = 100.0  # 到达终点：给予 +100 的巨额奖励
+                calc_reward = 50.0   # 到达终点：给予大额奖励 (建议50-100)
             else:
-                calc_reward = -10.0  # 撞墙/非法：给予 -10 的惩罚 (比原来的 -1 更痛)
+                calc_reward = -10.0  # 撞墙/非法：给予惩罚
+        else:
+             # 增加每一步的微小惩罚，鼓励走最短路，防止在原地利用势能刷分
+             calc_reward = -0.1 
         
-        total_reward = calc_reward 
-        
-        # --- 4. 【关键修改】计算势能奖励 Shaping Reward ---
+        # --- 4. 计算势能奖励 Shaping Reward ---
+        shaping_reward = 0.0
         try:
-            # A. 计算当前位置（动作后）的势能
+            # A. 计算当前位置（动作后）的势能 (Phi_t+1)
             next_potential = self.get_dstarlite_potential(this_veh_cp, this_veh_tp, valid_path_matrix)
             
-            # B. 获取上一步位置（动作前）的势能
-            # 如果是第一步，没有 last_potential，则设为当前势能（即差分为0）
+            # B. 获取上一步位置（动作前）的势能 (Phi_t)
+            # 如果没有 last_potential，说明是 Episode 的第一步
             if not hasattr(veh_obj, 'last_potential'):
-                veh_obj.last_potential = next_potential 
-            prev_potential = veh_obj.last_potential
-            
-            # C. 计算势能差分 F = gamma * Phi(next) - Phi(prev)
-            shaping_reward = 0.0
-            
-            if is_end:
-                if reward > 0:
-                    # 如果到达终点，理论上势能归零，Agent 获得之前的势能红利
-                    shaping_reward = 0.0 - prev_potential
-                else:
-                    # 如果撞墙，不给予势能奖励（或者也可以给，但通常撞墙不需要势能引导）
-                    shaping_reward = 0.0
+                # 第一步不计算差分奖励，只记录当前势能供下一步使用
+                veh_obj.last_potential = next_potential
+                shaping_reward = 0.0
             else:
-                # 正常行走
-                shaping_reward = (self.gamma * next_potential) - prev_potential
-            
+                prev_potential = veh_obj.last_potential
+                
+                # C. 计算势能差分 F = gamma * Phi(next) - Phi(prev)
+                if is_end:
+                    if reward > 0:
+                        # 到达终点：Phi(Target)=0 (理想情况)，补齐最后一步的势能跃迁
+                        # 注意：如果 get_dstarlite_potential 对终点返回 0，则公式自然成立
+                        # 这里手动引导：获得上一步势能的释放
+                        shaping_reward = (self.gamma * 0.0) - prev_potential
+                    else:
+                        # 撞墙：势能引导失败，不给 Shaping 奖励，或者给 0
+                        shaping_reward = 0.0
+                else:
+                    # 正常行走
+                    # 只有当位置发生改变时才计算（防止卡死在墙角刷分）
+                    if next_potential == prev_potential:
+                         shaping_reward = 0.0
+                    else:
+                         shaping_reward = (self.gamma * next_potential) - prev_potential
+                
+                # 更新记忆
+                veh_obj.last_potential = next_potential
+
             # D. 【核心防抖】钳制 Shaping 奖励幅度
-            # 防止动态障碍物移动导致路径突然变长，产生如 -37.5 的巨额扣分
-            # 强制将每一步的引导奖励限制在 [-2.0, +2.0] 之间
+            # 限制范围，防止 D* Lite 在重规划时路径突变产生巨大的奖励震荡
             shaping_reward = max(min(shaping_reward, 2.0), -2.0)
-            
-            # E. 更新小车的势能记忆
-            veh_obj.last_potential = next_potential
-            
-            # F. 计算最终给 RL 的总奖励
-            total_reward = calc_reward + (self.shaping_factor * shaping_reward)
             
         except Exception as e:
             print(f"Shaping Error: {e}")
+            shaping_reward = 0.0
+
+        # F. 计算最终给 RL 的总奖励
+        if self.use_shaping:
+            total_reward = calc_reward + (self.shaping_factor * shaping_reward)
+        else:
             total_reward = calc_reward
 
         # --- 5. 存储经验到 Replay Buffer ---
-        veh_obj.obs_next, veh_obj.reward = obs, total_reward
+        # 这里的 veh_obj.obs_current 是在 choose_action 里存下的 (State_t)
+        # obs_next 是刚刚生成的 (State_t+1)
+        veh_obj.obs_next = obs_next
+        veh_obj.reward = total_reward
         is_done = 1 if is_end else 0
         
         self.agent.store_transition(veh_obj.obs_current, veh_obj.action[-1], veh_obj.reward, veh_obj.obs_next, is_done)
-        self.reward_acc += reward
-        if self.control_mode == "use_NN":
-            return
-
-        veh_obj = None
-        for veh in self.veh_group:
-            if this_veh == veh.veh_name:
-                veh_obj = veh
-                break
-        obs, this_veh_cp, this_veh_tp, valid_path_matrix = self.create_state(all_info, this_veh)
-
-        total_reward = reward 
         
-        try:
-            # 1. 计算当前（动作后）的势能 (Next Potential)
-            next_potential = self.get_dstarlite_potential(this_veh_cp, this_veh_tp, valid_path_matrix)
-            
-            # 2. 获取上一步（动作前）的势能 (Prev Potential)
-            if not hasattr(veh_obj, 'last_potential'):
-                veh_obj.last_potential = next_potential 
-            prev_potential = veh_obj.last_potential
-            
-            # 3. 计算势能差分奖励: F = gamma * Phi(next) - Phi(prev)
-            if is_end:
-                shaping_reward = next_potential - prev_potential
-            else:
-                # 避免原地不动的刷分
-                if next_potential == prev_potential:
-                    shaping_reward = 0.0 
-                else:
-                    shaping_reward = (self.gamma * next_potential) - prev_potential
-            
-            # 4. 更新势能
-            veh_obj.last_potential = next_potential
-            
-            # 5. 叠加奖励
-            total_reward = reward + (self.shaping_factor * shaping_reward)
-            
-        except Exception as e:
-            print(f"Shaping Error: {e}")
-            total_reward = reward
-
-        veh_obj.obs_next, veh_obj.reward = obs, total_reward
-
-        is_done = 1 if is_end else 0
-        self.agent.store_transition(veh_obj.obs_current, veh_obj.action[-1], veh_obj.reward, veh_obj.obs_next, is_done)
 
     def create_state(self, all_info, this_veh):
         layout = all_info[0]
