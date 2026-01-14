@@ -156,10 +156,14 @@ class DQNAgentController:
         # 获取路径长度
         path_len = dsl.get_path_length()
         
-        # 如果不可达，给予大惩罚
-        if path_len >= 1000:
-            return -30.0 
+        MAX_POTENTIAL_PENALTY = 50.0 
         
+        if path_len >= 1000: # 代表无解/不可达
+            path_len = MAX_POTENTIAL_PENALTY
+        
+        # 再次截断，确保任何路径长度不超过上限
+        path_len = min(path_len, MAX_POTENTIAL_PENALTY)
+
         return -1.0 * path_len
 
     def choose_action(self, all_info, this_veh):  # all_infor=[layout  , current_place, target_place
@@ -205,6 +209,80 @@ class DQNAgentController:
         return action
 
     def store_info(self, all_info, reward, is_end, this_veh):
+        # 记录原始累积奖励（用于绘图，不影响训练）
+        self.reward_acc += reward
+        
+        # 如果是只使用网络模式（不训练），直接返回
+        if self.control_mode == "use_NN":
+            return
+
+        # --- 1. 获取当前小车的对象 ---
+        veh_obj = None
+        for veh in self.veh_group:
+            if this_veh == veh.veh_name:
+                veh_obj = veh
+                break
+        
+        # --- 2. 获取当前状态 (State) ---
+        obs, this_veh_cp, this_veh_tp, valid_path_matrix = self.create_state(all_info, this_veh)
+
+        # --- 3. 【关键修改】重构基础奖励 (The Carrot and Stick) ---
+        # 说明：为了防止 Shaping 奖励喧宾夺主，必须显著放大终点奖励
+        calc_reward = reward # 创建一个临时变量用于计算
+        
+        if is_end:
+            if reward > 0:
+                calc_reward = 100.0  # 到达终点：给予 +100 的巨额奖励
+            else:
+                calc_reward = -10.0  # 撞墙/非法：给予 -10 的惩罚 (比原来的 -1 更痛)
+        
+        total_reward = calc_reward 
+        
+        # --- 4. 【关键修改】计算势能奖励 Shaping Reward ---
+        try:
+            # A. 计算当前位置（动作后）的势能
+            next_potential = self.get_dstarlite_potential(this_veh_cp, this_veh_tp, valid_path_matrix)
+            
+            # B. 获取上一步位置（动作前）的势能
+            # 如果是第一步，没有 last_potential，则设为当前势能（即差分为0）
+            if not hasattr(veh_obj, 'last_potential'):
+                veh_obj.last_potential = next_potential 
+            prev_potential = veh_obj.last_potential
+            
+            # C. 计算势能差分 F = gamma * Phi(next) - Phi(prev)
+            shaping_reward = 0.0
+            
+            if is_end:
+                if reward > 0:
+                    # 如果到达终点，理论上势能归零，Agent 获得之前的势能红利
+                    shaping_reward = 0.0 - prev_potential
+                else:
+                    # 如果撞墙，不给予势能奖励（或者也可以给，但通常撞墙不需要势能引导）
+                    shaping_reward = 0.0
+            else:
+                # 正常行走
+                shaping_reward = (self.gamma * next_potential) - prev_potential
+            
+            # D. 【核心防抖】钳制 Shaping 奖励幅度
+            # 防止动态障碍物移动导致路径突然变长，产生如 -37.5 的巨额扣分
+            # 强制将每一步的引导奖励限制在 [-2.0, +2.0] 之间
+            shaping_reward = max(min(shaping_reward, 2.0), -2.0)
+            
+            # E. 更新小车的势能记忆
+            veh_obj.last_potential = next_potential
+            
+            # F. 计算最终给 RL 的总奖励
+            total_reward = calc_reward + (self.shaping_factor * shaping_reward)
+            
+        except Exception as e:
+            print(f"Shaping Error: {e}")
+            total_reward = calc_reward
+
+        # --- 5. 存储经验到 Replay Buffer ---
+        veh_obj.obs_next, veh_obj.reward = obs, total_reward
+        is_done = 1 if is_end else 0
+        
+        self.agent.store_transition(veh_obj.obs_current, veh_obj.action[-1], veh_obj.reward, veh_obj.obs_next, is_done)
         self.reward_acc += reward
         if self.control_mode == "use_NN":
             return
